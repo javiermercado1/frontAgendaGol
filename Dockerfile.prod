@@ -8,12 +8,12 @@ RUN npm ci --only=production
 COPY . .
 RUN npm run build
 
-# Etapa de producción
+
 FROM nginx:alpine
 
 COPY --from=build /app/build /usr/share/nginx/html
 
-# Crear configuración personalizada de nginx
+
 RUN echo 'server { \
     listen 3000; \
     location / { \
