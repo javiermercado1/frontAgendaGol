@@ -8,6 +8,7 @@ Dockerfile.prod
 .gitignore
 README.md
 .env
+.env.local
 .nyc_output
 coverage
 .coverage
