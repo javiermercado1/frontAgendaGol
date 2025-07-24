@@ -1,3 +1,9 @@
+## Deployed Application
+
+The application is deployed and connected to the backend. You can access it at the following link:
+
+[Deployed Application](https://front-agenda-ik7epixpc-javimer25-gmailcoms-projects.vercel.app/)
+
 # Getting Started with Create React App
 
 This project was bootstrapped with [Create React App](https://github.com/facebook/create-react-app).

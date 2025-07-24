@@ -6,6 +6,7 @@ import { apiService, Reservation, Field } from '../services/api';
 const AllReservations: React.FC = () => {
   const { user } = useAuth();
   
+  const [allReservations, setAllReservations] = useState<Reservation[]>([]); // Todas las reservas sin filtrar
   const [reservations, setReservations] = useState<Reservation[]>([]);
   const [fields, setFields] = useState<Field[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -19,10 +20,24 @@ const AllReservations: React.FC = () => {
   const [dropdownOpen, setDropdownOpen] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
 
-  // Cargar datos
+  // Cargar datos (sin incluir selectedUser en dependencias)
   useEffect(() => {
     loadData();
-  }, [currentPage, selectedStatus, selectedField, selectedUser]);
+  }, [currentPage, selectedStatus, selectedField]);
+
+  // Filtro local por usuario
+  useEffect(() => {
+    if (!selectedUser) {
+      // Si no hay filtro de usuario, mostrar todas las reservas
+      setReservations(allReservations);
+    } else {
+      // Filtrar localmente por ID de usuario
+      const filtered = allReservations.filter(reservation => 
+        reservation.user_id.toString() === selectedUser
+      );
+      setReservations(filtered);
+    }
+  }, [selectedUser, allReservations]);
 
   // Cargar campos una sola vez
   useEffect(() => {
@@ -57,42 +72,50 @@ const AllReservations: React.FC = () => {
     }
   };
 
-  const loadData = async () => {
-    setIsLoading(true);
-    setError('');
-
+    const loadData = async (page: number = 1) => {
     try {
+      setIsLoading(true);
+      setError('');
+
       const token = localStorage.getItem('auth_token');
       if (!token) {
-        setError('Token de autenticación no encontrado');
-        setIsLoading(false);
+        setError('No token found');
         return;
       }
 
-      // Preparar parámetros
-      const fieldId = selectedField === 'all' ? undefined : parseInt(selectedField);
-      const userId = selectedUser ? parseInt(selectedUser) : undefined;
-      const status = selectedStatus === 'all' ? undefined : selectedStatus;
+      // Llamar al API sin filtro de usuario (será local)
+      const status = selectedStatus !== 'all' ? selectedStatus : undefined;
+      const fieldId = selectedField !== 'all' ? parseInt(selectedField) : undefined;
+      // NO pasamos userId aquí, será filtro local
 
-      const reservationsResponse = await apiService.getReservations(
+      const reservationsData = await apiService.getReservations(
         token,
-        currentPage,
-        10,
+        page,
+        10, // limit
         status,
-        fieldId,
-        userId
+        fieldId
+        // userId omitido para filtro local
       );
-
-      console.log('All reservations response:', reservationsResponse);
-
-      if (reservationsResponse && reservationsResponse.reservations) {
-        setReservations(reservationsResponse.reservations);
-        setTotalPages(Math.ceil(reservationsResponse.total / 10));
+      
+      if (reservationsData.reservations) {
+        setAllReservations(reservationsData.reservations); // Guardar todas las reservas
+        setReservations(reservationsData.reservations);
+        // Calcular páginas basado en la respuesta de la API
+        const totalPagesCalculated = Math.ceil(reservationsData.total / 10);
+        setTotalPages(totalPagesCalculated);
+        setCurrentPage(reservationsData.page);
       }
 
-    } catch (err: any) {
-      console.error('Error loading reservations:', err);
-      setError(err.message || 'Error al cargar las reservas');
+      // Cargar campos si no están cargados
+      if (fields.length === 0) {
+        const fieldsResponse = await apiService.getFields(token);
+        if (fieldsResponse && fieldsResponse.fields) {
+          setFields(fieldsResponse.fields);
+        }
+      }
+    } catch (error) {
+      console.error('Error loading data:', error);
+      setError('Error al cargar los datos');
     } finally {
       setIsLoading(false);
     }
@@ -197,10 +220,10 @@ const AllReservations: React.FC = () => {
     setCurrentPage(1);
   };
 
-  // Filtro de usuario
+  // Filtro de usuario (local, no resetea página)
   const handleUserChange = (userId: string) => {
     setSelectedUser(userId);
-    setCurrentPage(1);
+    // NO reseteamos la página porque es filtro local
   };
 
   if (isLoading) {

@@ -3,11 +3,47 @@ import { useAuth } from '../contexts/AuthContext';
 import { Link } from 'react-router-dom';
 import { apiService, AdminUser, AdminUsersResponse } from '../services/api';
 
+// Interfaces para las reservas
+interface Reservation {
+  id: number;
+  user_id: number;
+  field_id: number;
+  field_name: string;
+  field_location: string;
+  start_time: string;
+  end_time: string;
+  duration_hours: number;
+  total_price: number;
+  status: string;
+  notes?: string;
+  created_at: string;
+  updated_at: string;
+  cancelled_at?: string;
+  cancelled_by?: number;
+}
+
+interface ReservationsResponse {
+  reservations: Reservation[];
+  total: number;
+  page: number;
+  size: number;
+}
+
+interface UserStats {
+  totalReservations: number;
+  totalSpent: number;
+  confirmedReservations: number;
+  cancelledReservations: number;
+}
+
 const AdminUsers: React.FC = () => {
   const { user } = useAuth();
   
   const [users, setUsers] = useState<AdminUser[]>([]);
+  const [reservations, setReservations] = useState<Reservation[]>([]);
+  const [userStats, setUserStats] = useState<Record<number, UserStats>>({});
   const [isLoading, setIsLoading] = useState(true);
+  const [isLoadingReservations, setIsLoadingReservations] = useState(false);
   const [error, setError] = useState('');
   const [currentPage, setCurrentPage] = useState(1);
   const [totalPages, setTotalPages] = useState(1);
@@ -20,6 +56,7 @@ const AdminUsers: React.FC = () => {
 
   useEffect(() => {
     loadUsers();
+    loadReservations();
   }, [currentPage, selectedRole, selectedStatus]);
 
   // Cerrar dropdown al hacer clic fuera
@@ -35,6 +72,11 @@ const AdminUsers: React.FC = () => {
       document.removeEventListener('mousedown', handleClickOutside);
     };
   }, []);
+
+  // Calcular estadísticas cuando cambien las reservas
+  useEffect(() => {
+    calculateUserStats();
+  }, [reservations]);
 
   const loadUsers = async () => {
     setIsLoading(true);
@@ -72,6 +114,61 @@ const AdminUsers: React.FC = () => {
     } finally {
       setIsLoading(false);
     }
+  };
+
+  const loadReservations = async () => {
+    setIsLoadingReservations(true);
+    
+    try {
+      const token = localStorage.getItem('auth_token');
+      if (!token) {
+        console.error('Token de autenticación no encontrado para reservas');
+        return;
+      }
+
+      const reservationsData = await apiService.getReservations(token);
+
+      if (reservationsData && reservationsData.reservations) {
+        setReservations(reservationsData.reservations);
+      }
+
+    } catch (err: any) {
+      console.error('Error loading reservations:', err);
+    } finally {
+      setIsLoadingReservations(false);
+    }
+  };
+
+  const calculateUserStats = () => {
+    const stats: Record<number, UserStats> = {};
+
+    // Inicializar stats para todos los usuarios
+    users.forEach(user => {
+      stats[user.id] = {
+        totalReservations: 0,
+        totalSpent: 0,
+        confirmedReservations: 0,
+        cancelledReservations: 0,
+      };
+    });
+
+    // Calcular estadísticas basadas en las reservas
+    reservations.forEach(reservation => {
+      const userId = reservation.user_id;
+      
+      if (stats[userId]) {
+        stats[userId].totalReservations++;
+        
+        if (reservation.status === 'confirmada') {
+          stats[userId].confirmedReservations++;
+          stats[userId].totalSpent += reservation.total_price;
+        } else if (reservation.status === 'cancelada') {
+          stats[userId].cancelledReservations++;
+        }
+      }
+    });
+
+    setUserStats(stats);
   };
 
   // Filtrar usuarios por término de búsqueda
@@ -134,6 +231,9 @@ const AdminUsers: React.FC = () => {
         <div className="text-center">
           <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-500 mx-auto"></div>
           <p className="mt-4 text-gray-600">Cargando usuarios...</p>
+          {isLoadingReservations && (
+            <p className="mt-2 text-sm text-gray-500">Calculando estadísticas de reservas...</p>
+          )}
         </div>
       </div>
     );
@@ -293,7 +393,15 @@ const AdminUsers: React.FC = () => {
 
           {/* Filtros y búsqueda */}
           <div className="bg-white rounded-lg shadow mb-6 p-6">
-            <h3 className="text-lg font-semibold text-gray-900 mb-4">Filtros y Búsqueda</h3>
+            <div className="flex justify-between items-center mb-4">
+              <h3 className="text-lg font-semibold text-gray-900">Filtros y Búsqueda</h3>
+              {isLoadingReservations && (
+                <div className="flex items-center text-sm text-blue-600">
+                  <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-blue-600 mr-2"></div>
+                  Calculando estadísticas...
+                </div>
+              )}
+            </div>
             
             {/* Barra de búsqueda */}
             <div className="mb-4">
@@ -413,8 +521,6 @@ const AdminUsers: React.FC = () => {
                       <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">📊 Estado</th>
                       <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">📅 Reservas</th>
                       <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">💰 Total Gastado</th>
-                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">📝 Registro</th>
-                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">🕐 Último Acceso</th>
                     </tr>
                   </thead>
                   <tbody className="bg-white divide-y divide-gray-200">
@@ -438,17 +544,21 @@ const AdminUsers: React.FC = () => {
                           </span>
                         </td>
                         <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                          {user.total_reservations}
+                          <div className="flex flex-col">
+                            <span className="font-medium">{userStats[user.id]?.totalReservations || 0}</span>
+                            <span className="text-xs text-gray-500">
+                              {userStats[user.id]?.confirmedReservations || 0} confirmadas, {userStats[user.id]?.cancelledReservations || 0} canceladas
+                            </span>
+                          </div>
                         </td>
                         <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
-                          {formatCurrency(user.total_spent)}
-                        </td>
-                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                          {formatDate(user.created_at)}
-                        </td>
-                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                          {user.last_login ? formatDate(user.last_login) : 'Nunca'}
-                        </td>
+                          <div className="flex flex-col">
+                            <span className="text-green-600 font-semibold">{formatCurrency(userStats[user.id]?.totalSpent || 0)}</span>
+                            {isLoadingReservations && (
+                              <span className="text-xs text-gray-400">Calculando...</span>
+                            )}
+                          </div>
+                        </td>        
                       </tr>
                     ))}
                   </tbody>
@@ -477,19 +587,17 @@ const AdminUsers: React.FC = () => {
                     <div className="grid grid-cols-2 gap-4 text-sm">
                       <div>
                         <p className="text-gray-500">📅 Reservas</p>
-                        <p className="font-medium">{user.total_reservations}</p>
+                        <p className="font-medium">{userStats[user.id]?.totalReservations || 0}</p>
+                        <p className="text-xs text-gray-400">
+                          {userStats[user.id]?.confirmedReservations || 0} confirmadas
+                        </p>
                       </div>
                       <div>
                         <p className="text-gray-500">💰 Total Gastado</p>
-                        <p className="font-medium">{formatCurrency(user.total_spent)}</p>
-                      </div>
-                      <div>
-                        <p className="text-gray-500">📝 Registro</p>
-                        <p className="font-medium">{formatDate(user.created_at)}</p>
-                      </div>
-                      <div>
-                        <p className="text-gray-500">🕐 Último Acceso</p>
-                        <p className="font-medium">{user.last_login ? formatDate(user.last_login) : 'Nunca'}</p>
+                        <p className="font-medium text-green-600">{formatCurrency(userStats[user.id]?.totalSpent || 0)}</p>
+                        {isLoadingReservations && (
+                          <p className="text-xs text-gray-400">Calculando...</p>
+                        )}
                       </div>
                     </div>
                   </div>
@@ -540,6 +648,39 @@ const AdminUsers: React.FC = () => {
                   >
                     Siguiente
                   </button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Resumen de estadísticas */}
+          {!isLoadingReservations && Object.keys(userStats).length > 0 && (
+            <div className="bg-white rounded-lg shadow mt-6 p-6">
+              <h3 className="text-lg font-semibold text-gray-900 mb-4">📊 Resumen General</h3>
+              <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+                <div className="bg-blue-50 p-4 rounded-lg">
+                  <div className="text-2xl font-bold text-blue-600">
+                    {Object.values(userStats).reduce((sum, stats) => sum + stats.totalReservations, 0)}
+                  </div>
+                  <div className="text-sm text-gray-600">Total Reservas</div>
+                </div>
+                <div className="bg-green-50 p-4 rounded-lg">
+                  <div className="text-2xl font-bold text-green-600">
+                    {formatCurrency(Object.values(userStats).reduce((sum, stats) => sum + stats.totalSpent, 0))}
+                  </div>
+                  <div className="text-sm text-gray-600">Ingresos Totales</div>
+                </div>
+                <div className="bg-purple-50 p-4 rounded-lg">
+                  <div className="text-2xl font-bold text-purple-600">
+                    {Object.values(userStats).reduce((sum, stats) => sum + stats.confirmedReservations, 0)}
+                  </div>
+                  <div className="text-sm text-gray-600">Reservas Confirmadas</div>
+                </div>
+                <div className="bg-red-50 p-4 rounded-lg">
+                  <div className="text-2xl font-bold text-red-600">
+                    {Object.values(userStats).reduce((sum, stats) => sum + stats.cancelledReservations, 0)}
+                  </div>
+                  <div className="text-sm text-gray-600">Reservas Canceladas</div>
                 </div>
               </div>
             </div>
